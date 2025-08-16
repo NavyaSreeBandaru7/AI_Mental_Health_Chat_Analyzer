@@ -1,0 +1,252 @@
+# AI Mental Health Analyzer Configuration
+# Production-ready configuration with security and performance settings
+
+app:
+  name: "AI Mental Health Analyzer"
+  version: "2.1.0"
+  environment: "production"  # development, staging, production
+  debug: false
+  timezone: "UTC"
+
+api:
+  host: "0.0.0.0"
+  port: 5000
+  workers: 4
+  timeout: 120
+  max_content_length: 16777216  # 16MB
+  rate_limit:
+    requests_per_minute: 100
+    burst_limit: 10
+  cors:
+    origins: ["http://localhost:3000", "http://localhost:8501"]
+    methods: ["GET", "POST", "PUT", "DELETE"]
+    headers: ["Content-Type", "Authorization"]
+
+dashboard:
+  host: "0.0.0.0"
+  port: 8501
+  title: "Mental Health AI Analytics"
+  theme: "dark"
+  auto_refresh_interval: 30  # seconds
+  max_data_points: 10000
+
+database:
+  type: "postgresql"  # sqlite, postgresql, mysql
+  host: "localhost"
+  port: 5432
+  name: "mental_health_analyzer"
+  username: "postgres"
+  password: "${DATABASE_PASSWORD}"  # Environment variable
+  pool_size: 20
+  max_overflow: 30
+  pool_timeout: 30
+  pool_recycle: 3600
+  echo: false
+
+redis:
+  host: "localhost"
+  port: 6379
+  db: 0
+  password: "${REDIS_PASSWORD}"
+  max_connections: 50
+  socket_timeout: 5
+  health_check_interval: 30
+
+ml_models:
+  model_cache_dir: "./data/models"
+  max_memory_usage: "4GB"
+  gpu_enabled: true
+  batch_size: 32
+  
+  # Model configurations
+  depression_model:
+    name: "mental/mental-bert-base-uncased"
+    cache_size: 1000
+    confidence_threshold: 0.7
+    
+  anxiety_model:
+    name: "j-hartmann/emotion-english-distilroberta-base"
+    cache_size: 1000
+    confidence_threshold: 0.7
+    
+  crisis_model:
+    name: "martin-ha/toxic-comment-model"
+    cache_size: 500
+    confidence_threshold: 0.8
+    
+  ensemble:
+    voting_strategy: "weighted"
+    weights:
+      depression: 0.3
+      anxiety: 0.3
+      crisis: 0.4
+
+nlp:
+  spacy_model: "en_core_web_sm"
+  max_text_length: 10000
+  preprocessing:
+    lowercase: true
+    remove_punctuation: false
+    remove_stopwords: false
+    lemmatization: true
+  
+  feature_extraction:
+    tfidf_max_features: 5000
+    ngram_range: [1, 3]
+    sentiment_analysis: true
+    emotion_analysis: true
+    linguistic_features: true
+
+data_collection:
+  sources:
+    reddit:
+      enabled: false  # Set to true with valid credentials
+      subreddits: ["depression", "anxiety", "mentalhealth", "SuicideWatch"]
+      max_posts_per_day: 1000
+      rate_limit_delay: 1  # seconds
+      
+    twitter:
+      enabled: false  # Set to true with valid credentials
+      keywords: ["depression", "anxiety", "mental health", "suicide", "self harm"]
+      max_tweets_per_day: 2000
+      rate_limit_delay: 0.5  # seconds
+      
+    synthetic:
+      enabled: true
+      daily_samples: 500
+      
+  preprocessing:
+    anonymization: true
+    min_text_length: 10
+    max_text_length: 5000
+    language_filter: "en"
+    remove_pii: true
+
+monitoring:
+  logging:
+    level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+    format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    file: "./logs/mental_health_analyzer.log"
+    max_size: "100MB"
+    backup_count: 5
+    
+  metrics:
+    enabled: true
+    prometheus_port: 9090
+    collection_interval: 30  # seconds
+    
+  alerts:
+    enabled: true
+    crisis_alert_threshold: 0.8
+    email_notifications: true
+    slack_webhook: "${SLACK_WEBHOOK_URL}"
+
+security:
+  secret_key: "${SECRET_KEY}"
+  jwt_secret: "${JWT_SECRET}"
+  token_expiry: 3600  # seconds
+  
+  encryption:
+    algorithm: "AES-256-GCM"
+    key_rotation_days: 30
+    
+  rate_limiting:
+    enabled: true
+    storage: "redis"
+    default_limit: "100/hour"
+    crisis_endpoint_limit: "500/hour"
+    
+  cors:
+    enabled: true
+    max_age: 86400
+
+privacy:
+  data_retention_days: 90
+  anonymization_enabled: true
+  gdpr_compliance: true
+  
+  pii_detection:
+    enabled: true
+    fields_to_anonymize: ["email", "phone", "ssn", "name"]
+    
+  user_consent:
+    required: true
+    tracking_enabled: false
+
+performance:
+  caching:
+    enabled: true
+    backend: "redis"
+    default_timeout: 3600  # seconds
+    prediction_cache_timeout: 1800
+    
+  async_processing:
+    enabled: true
+    max_workers: 8
+    queue_size: 1000
+    
+  optimization:
+    model_quantization: true
+    batch_inference: true
+    gpu_acceleration: true
+
+deployment:
+  docker:
+    image: "mental-health-analyzer:latest"
+    registry: "your-registry.com"
+    
+  kubernetes:
+    namespace: "mental-health"
+    replicas: 3
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "1Gi"
+      limits:
+        cpu: "2"
+        memory: "4Gi"
+        
+  health_checks:
+    startup_probe:
+      initial_delay: 30
+      period: 10
+      timeout: 5
+      failure_threshold: 3
+      
+    liveness_probe:
+      initial_delay: 60
+      period: 30
+      timeout: 10
+      failure_threshold: 3
+      
+    readiness_probe:
+      initial_delay: 10
+      period: 5
+      timeout: 3
+      failure_threshold: 2
+
+# Crisis intervention resources
+crisis_resources:
+  hotlines:
+    us:
+      suicide_prevention: "988"
+      crisis_text: "741741"
+      
+  emergency_protocols:
+    immediate_risk_threshold: 0.8
+    notification_contacts: ["admin@company.com"]
+    
+  professional_referrals:
+    enabled: true
+    integration_apis: []
+
+# Feature flags
+features:
+  real_time_analysis: true
+  batch_processing: true
+  dashboard_analytics: true
+  api_endpoints: true
+  crisis_detection: true
+  user_segmentation: true
+  trend_analysis: true
+  export_functionality: true
