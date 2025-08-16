@@ -1,0 +1,80 @@
+# Multi-stage Docker build for AI Mental Health Analyzer
+# Optimized for production deployment with security and performance
+
+FROM python:3.9-slim as base
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Create non-root user for security
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    curl \
+    git \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set work directory
+WORKDIR /app
+
+# Copy requirements first (for better caching)
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --upgrade pip && \
+    pip install -r requirements.txt
+
+# Download required models
+RUN python -m spacy download en_core_web_sm && \
+    python -c "import nltk; nltk.download('vader_lexicon'); nltk.download('punkt'); nltk.download('stopwords'); nltk.download('wordnet')"
+
+# Development stage
+FROM base as development
+
+# Install development dependencies
+COPY requirements-dev.txt .
+RUN pip install -r requirements-dev.txt
+
+# Copy source code
+COPY . .
+
+# Change ownership to appuser
+RUN chown -R appuser:appuser /app
+USER appuser
+
+# Expose ports
+EXPOSE 8501 5000
+
+# Development command
+CMD ["python", "main.py"]
+
+# Production stage
+FROM base as production
+
+# Copy only necessary files
+COPY main.py streamlit_dashboard.py ./
+COPY src/ ./src/
+COPY config/ ./config/
+
+# Create necessary directories
+RUN mkdir -p data/models data/logs && \
+    chown -R appuser:appuser /app
+
+# Switch to non-root user
+USER appuser
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:5000/health || exit 1
+
+# Expose ports
+EXPOSE 8501 5000
+
+# Production command
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "4", "--timeout", "120", "main:create_api_app()"]
