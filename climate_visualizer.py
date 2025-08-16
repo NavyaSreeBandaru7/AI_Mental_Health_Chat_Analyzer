@@ -1,525 +1,667 @@
+import streamlit as st
 import pandas as pd
 import numpy as np
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import plotly.figure_factory as ff
+from datetime import datetime, timedelta
+import asyncio
+from wordcloud import WordCloud
 import matplotlib.pyplot as plt
 import seaborn as sns
-from datetime import datetime
-import requests
+from main import MentalHealthAnalyzerSystem, MentalHealthSeverity
+import time
+import base64
+import io
 
-# Set up plotting style
-plt.style.use('default')
-sns.set_palette("Set2")
+# Configure page
+st.set_page_config(
+    page_title="Mental Health AI Analytics",
+    page_icon="🧠",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-print("🎓 Welcome to Climate Data Analysis Bootcamp!")
-print("Follow these exercises to master climate data visualization\n")
+# Custom CSS for professional styling
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 3rem;
+        font-weight: bold;
+        color: #1f77b4;
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+    .metric-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 1rem;
+        border-radius: 10px;
+        color: white;
+        text-align: center;
+        margin: 0.5rem 0;
+    }
+    .alert-high {
+        background-color: #ff4b4b;
+        padding: 1rem;
+        border-radius: 5px;
+        color: white;
+        margin: 1rem 0;
+    }
+    .alert-moderate {
+        background-color: #ffa500;
+        padding: 1rem;
+        border-radius: 5px;
+        color: white;
+        margin: 1rem 0;
+    }
+    .insight-box {
+        border-left: 4px solid #1f77b4;
+        padding: 1rem;
+        background-color: #f0f2f6;
+        margin: 1rem 0;
+    }
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 2px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        padding-left: 20px;
+        padding-right: 20px;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-# ============================================================================
-# EXERCISE 1: BASIC DATA EXPLORATION
-# ============================================================================
-
-def exercise_1_data_exploration():
-    """
-    Exercise 1: Learn to load and explore climate data
-    
-    Learning Goals:
-    - Load CSV data with pandas
-    - Explore data structure and statistics
-    - Handle missing values
-    """
-    print("📊 EXERCISE 1: Data Exploration Fundamentals")
-    print("-" * 50)
-    
-    # Create sample temperature data for learning
+@st.cache_data
+def load_sample_data():
+    """Load sample data for demonstration"""
     np.random.seed(42)
-    years = range(1880, 2024)
+    dates = pd.date_range(start='2024-01-01', end='2024-12-31', freq='D')
     
-    # Simulate realistic temperature data with trend + noise
-    trend = np.linspace(-0.3, 1.2, len(years))
-    noise = np.random.normal(0, 0.2, len(years))
-    temp_anomaly = trend + noise
+    data = []
+    sample_texts = [
+        "I've been feeling really down lately, nothing seems to bring me joy",
+        "Anxiety is overwhelming me, can't stop worrying about everything",
+        "Work stress is killing me, I feel completely burnt out",
+        "Having trouble sleeping, mind racing with negative thoughts",
+        "Feeling hopeless about the future, nothing seems worth it",
+        "Great day today! Feeling positive and energetic",
+        "Managed my stress well with meditation and exercise",
+        "Therapy session was really helpful, making progress",
+        "Spending time with friends lifted my mood significantly",
+        "Accomplished a lot today, feeling proud of myself"
+    ]
     
-    # Create DataFrame
-    df = pd.DataFrame({
-        'Year': years,
-        'Temperature_Anomaly': temp_anomaly,
-        'Source': 'NASA_GISS'
-    })
+    for i, date in enumerate(dates[:200]):  # Last 200 days
+        text = sample_texts[i % len(sample_texts)]
+        # Simulate varying scores based on text sentiment
+        if any(word in text.lower() for word in ['down', 'anxiety', 'stress', 'hopeless']):
+            depression = np.random.uniform(0.6, 0.9)
+            anxiety = np.random.uniform(0.5, 0.8)
+            stress = np.random.uniform(0.4, 0.9)
+        else:
+            depression = np.random.uniform(0.1, 0.4)
+            anxiety = np.random.uniform(0.1, 0.3)
+            stress = np.random.uniform(0.1, 0.4)
+            
+        avg_score = (depression + anxiety + stress) / 3
+        if avg_score >= 0.7:
+            severity = 'critical'
+        elif avg_score >= 0.5:
+            severity = 'high'
+        elif avg_score >= 0.3:
+            severity = 'moderate'
+        else:
+            severity = 'low'
+            
+        data.append({
+            'date': date,
+            'text': text,
+            'depression_score': depression,
+            'anxiety_score': anxiety,
+            'stress_score': stress,
+            'severity': severity,
+            'confidence': np.random.uniform(0.7, 0.95),
+            'user_id': f'user_{np.random.randint(1, 50)}'
+        })
     
-    # Add some missing values to make it realistic
-    df.loc[5:10, 'Temperature_Anomaly'] = np.nan
-    
-    print("🔍 Step 1: Examine the data structure")
-    print(f"Data shape: {df.shape}")
-    print(f"Column names: {list(df.columns)}")
-    print(f"Data types:\n{df.dtypes}\n")
-    
-    print("🔍 Step 2: Look at the first few rows")
-    print(df.head(10))
-    print()
-    
-    print("🔍 Step 3: Basic statistics")
-    print(df.describe())
-    print()
-    
-    print("🔍 Step 4: Check for missing values")
-    print(f"Missing values:\n{df.isnull().sum()}")
-    print()
-    
-    print("✅ Exercise 1 Complete!")
-    print("💡 Key Learning: Always explore your data before analysis!")
-    print("   - Check data types and shapes")
-    print("   - Look for missing values")
-    print("   - Calculate basic statistics")
-    print()
-    
-    return df
+    return pd.DataFrame(data)
 
-# ============================================================================
-# EXERCISE 2: BASIC VISUALIZATION
-# ============================================================================
+def create_severity_gauge(value, title):
+    """Create a gauge chart for severity levels"""
+    fig = go.Figure(go.Indicator(
+        mode = "gauge+number+delta",
+        value = value,
+        domain = {'x': [0, 1], 'y': [0, 1]},
+        title = {'text': title},
+        delta = {'reference': 0.5},
+        gauge = {
+            'axis': {'range': [None, 1]},
+            'bar': {'color': "darkblue"},
+            'steps': [
+                {'range': [0, 0.3], 'color': "lightgreen"},
+                {'range': [0.3, 0.6], 'color': "yellow"},
+                {'range': [0.6, 0.8], 'color': "orange"},
+                {'range': [0.8, 1], 'color': "red"}
+            ],
+            'threshold': {
+                'line': {'color': "red", 'width': 4},
+                'thickness': 0.75,
+                'value': 0.8
+            }
+        }
+    ))
+    fig.update_layout(height=300)
+    return fig
 
-def exercise_2_basic_plotting(df):
-    """
-    Exercise 2: Create your first climate visualization
+def create_heatmap_analysis(df):
+    """Create correlation heatmap"""
+    corr_data = df[['depression_score', 'anxiety_score', 'stress_score', 'confidence']].corr()
     
-    Learning Goals:
-    - Create line plots with matplotlib
-    - Add titles and labels
-    - Save plots to files
-    """
-    print("📈 EXERCISE 2: Basic Climate Plotting")
-    print("-" * 50)
-    
-    # Clean the data first (handle missing values)
-    df_clean = df.dropna()
-    
-    print("🎨 Step 1: Create a simple line plot")
-    
-    # Create your first climate plot
-    plt.figure(figsize=(12, 6))
-    plt.plot(df_clean['Year'], df_clean['Temperature_Anomaly'], 
-             color='blue', linewidth=1.5, alpha=0.8)
-    
-    # Add horizontal reference line at zero
-    plt.axhline(y=0, color='black', linestyle='--', alpha=0.5)
-    
-    # Customize the plot
-    plt.title('Global Temperature Anomalies (1880-2023)', fontsize=14, fontweight='bold')
-    plt.xlabel('Year', fontsize=12)
-    plt.ylabel('Temperature Anomaly (°C)', fontsize=12)
-    plt.grid(True, alpha=0.3)
-    
-    # Save the plot
-    plt.savefig('exercise_2_basic_plot.png', dpi=300, bbox_inches='tight')
-    plt.show()
-    
-    print("✅ Basic plot created and saved!")
-    print()
-    
-    print("🎨 Step 2: Add color coding for warming/cooling")
-    
-    # Create a more sophisticated plot with color coding
-    plt.figure(figsize=(12, 6))
-    
-    # Separate positive and negative anomalies
-    positive_mask = df_clean['Temperature_Anomaly'] >= 0
-    negative_mask = df_clean['Temperature_Anomaly'] < 0
-    
-    # Plot with different colors
-    plt.plot(df_clean[positive_mask]['Year'], 
-             df_clean[positive_mask]['Temperature_Anomaly'], 
-             color='red', linewidth=1.5, alpha=0.8, label='Warming')
-    plt.plot(df_clean[negative_mask]['Year'], 
-             df_clean[negative_mask]['Temperature_Anomaly'], 
-             color='blue', linewidth=1.5, alpha=0.8, label='Cooling')
-    
-    # Fill areas for better visual impact
-    plt.fill_between(df_clean['Year'], 0, df_clean['Temperature_Anomaly'],
-                     where=(df_clean['Temperature_Anomaly'] >= 0),
-                     color='red', alpha=0.3)
-    plt.fill_between(df_clean['Year'], 0, df_clean['Temperature_Anomaly'],
-                     where=(df_clean['Temperature_Anomaly'] < 0),
-                     color='blue', alpha=0.3)
-    
-    plt.axhline(y=0, color='black', linestyle='-', alpha=0.8)
-    plt.title('Temperature Anomalies: Warming vs Cooling Periods', fontsize=14, fontweight='bold')
-    plt.xlabel('Year', fontsize=12)
-    plt.ylabel('Temperature Anomaly (°C)', fontsize=12)
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    
-    plt.savefig('exercise_2_colored_plot.png', dpi=300, bbox_inches='tight')
-    plt.show()
-    
-    print("✅ Exercise 2 Complete!")
-    print("💡 Key Learning: Good visualizations tell a story!")
-    print("   - Use colors meaningfully")
-    print("   - Add reference lines for context")
-    print("   - Always label axes and add titles")
-    print()
-    
-    return df_clean
+    fig = ff.create_annotated_heatmap(
+        z=corr_data.values,
+        x=list(corr_data.columns),
+        y=list(corr_data.index),
+        annotation_text=corr_data.round(2).values,
+        showscale=True,
+        colorscale='RdBu'
+    )
+    fig.update_layout(title='Mental Health Metrics Correlation Analysis')
+    return fig
 
-# ============================================================================
-# EXERCISE 3: DATA PROCESSING AND TRENDS
-# ============================================================================
+def create_time_series_analysis(df):
+    """Create advanced time series analysis"""
+    # Resample data by week
+    df_weekly = df.set_index('date').resample('W').mean()
+    
+    fig = make_subplots(
+        rows=2, cols=2,
+        subplot_titles=('Depression Trends', 'Anxiety Trends', 'Stress Trends', 'Overall Risk Level'),
+        specs=[[{"secondary_y": True}, {"secondary_y": True}],
+               [{"secondary_y": True}, {"secondary_y": True}]]
+    )
+    
+    # Depression trend with confidence intervals
+    fig.add_trace(
+        go.Scatter(
+            x=df_weekly.index, 
+            y=df_weekly['depression_score'],
+            mode='lines+markers',
+            name='Depression',
+            line=dict(color='blue', width=3)
+        ),
+        row=1, col=1
+    )
+    
+    # Anxiety trend
+    fig.add_trace(
+        go.Scatter(
+            x=df_weekly.index, 
+            y=df_weekly['anxiety_score'],
+            mode='lines+markers',
+            name='Anxiety',
+            line=dict(color='orange', width=3)
+        ),
+        row=1, col=2
+    )
+    
+    # Stress trend
+    fig.add_trace(
+        go.Scatter(
+            x=df_weekly.index, 
+            y=df_weekly['stress_score'],
+            mode='lines+markers',
+            name='Stress',
+            line=dict(color='red', width=3)
+        ),
+        row=2, col=1
+    )
+    
+    # Overall risk (average of all scores)
+    df_weekly['overall_risk'] = (df_weekly['depression_score'] + 
+                                df_weekly['anxiety_score'] + 
+                                df_weekly['stress_score']) / 3
+    
+    fig.add_trace(
+        go.Scatter(
+            x=df_weekly.index, 
+            y=df_weekly['overall_risk'],
+            mode='lines+markers',
+            name='Overall Risk',
+            fill='tonexty',
+            line=dict(color='purple', width=3)
+        ),
+        row=2, col=2
+    )
+    
+    fig.update_layout(height=600, title_text="Advanced Time Series Analysis")
+    return fig
 
-def exercise_3_trend_analysis(df):
-    """
-    Exercise 3: Calculate and visualize trends
+def create_user_segmentation(df):
+    """Create user segmentation analysis"""
+    user_analysis = df.groupby('user_id').agg({
+        'depression_score': 'mean',
+        'anxiety_score': 'mean', 
+        'stress_score': 'mean',
+        'confidence': 'mean'
+    }).reset_index()
     
-    Learning Goals:
-    - Calculate moving averages
-    - Perform linear regression
-    - Create multi-line plots
-    """
-    print("📊 EXERCISE 3: Trend Analysis")
-    print("-" * 50)
+    user_analysis['risk_level'] = (user_analysis['depression_score'] + 
+                                  user_analysis['anxiety_score'] + 
+                                  user_analysis['stress_score']) / 3
     
-    print("🔄 Step 1: Calculate moving averages")
+    # Create 3D scatter plot
+    fig = go.Figure(data=[go.Scatter3d(
+        x=user_analysis['depression_score'],
+        y=user_analysis['anxiety_score'],
+        z=user_analysis['stress_score'],
+        mode='markers',
+        marker=dict(
+            size=user_analysis['confidence'] * 20,
+            color=user_analysis['risk_level'],
+            colorscale='Viridis',
+            showscale=True,
+            colorbar=dict(title="Risk Level")
+        ),
+        text=user_analysis['user_id'],
+        hovertemplate='<b>%{text}</b><br>' +
+                      'Depression: %{x:.2f}<br>' +
+                      'Anxiety: %{y:.2f}<br>' +
+                      'Stress: %{z:.2f}<br>' +
+                      '<extra></extra>'
+    )])
     
-    # Calculate different moving averages
-    df['MA_5yr'] = df['Temperature_Anomaly'].rolling(window=5, center=True).mean()
-    df['MA_10yr'] = df['Temperature_Anomaly'].rolling(window=10, center=True).mean()
-    df['MA_20yr'] = df['Temperature_Anomaly'].rolling(window=20, center=True).mean()
-    
-    print("Moving averages calculated:")
-    print("- 5-year moving average")
-    print("- 10-year moving average") 
-    print("- 20-year moving average")
-    print()
-    
-    print("📈 Step 2: Visualize trends")
-    
-    plt.figure(figsize=(14, 8))
-    
-    # Plot original data and moving averages
-    plt.plot(df['Year'], df['Temperature_Anomaly'], 
-             color='lightgray', alpha=0.7, linewidth=0.8, label='Annual Data')
-    plt.plot(df['Year'], df['MA_5yr'], 
-             color='blue', linewidth=1.5, label='5-year Average')
-    plt.plot(df['Year'], df['MA_10yr'], 
-             color='orange', linewidth=2, label='10-year Average')
-    plt.plot(df['Year'], df['MA_20yr'], 
-             color='red', linewidth=2.5, label='20-year Average')
-    
-    plt.axhline(y=0, color='black', linestyle='--', alpha=0.5)
-    plt.title('Temperature Trends: Raw Data vs Moving Averages', fontsize=14, fontweight='bold')
-    plt.xlabel('Year', fontsize=12)
-    plt.ylabel('Temperature Anomaly (°C)', fontsize=12)
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    
-    plt.savefig('exercise_3_trends.png', dpi=300, bbox_inches='tight')
-    plt.show()
-    
-    print("🔍 Step 3: Calculate linear trend")
-    
-    # Perform linear regression
-    from scipy import stats
-    
-    # Remove NaN values for regression
-    valid_data = df.dropna(subset=['Temperature_Anomaly'])
-    slope, intercept, r_value, p_value, std_err = stats.linregress(
-        valid_data['Year'], valid_data['Temperature_Anomaly'])
-    
-    # Calculate trend line
-    trend_line = slope * valid_data['Year'] + intercept
-    
-    # Convert slope to warming per decade
-    warming_per_decade = slope * 10
-    
-    print(f"📊 Trend Analysis Results:")
-    print(f"   • Warming rate: {warming_per_decade:.4f}°C per decade")
-    print(f"   • Correlation (R): {r_value:.4f}")
-    print(f"   • Statistical significance (p-value): {p_value:.2e}")
-    print()
-    
-    # Plot with trend line
-    plt.figure(figsize=(12, 8))
-    plt.scatter(valid_data['Year'], valid_data['Temperature_Anomaly'], 
-                alpha=0.6, color='blue', s=20, label='Annual Data')
-    plt.plot(valid_data['Year'], trend_line, 
-             color='red', linewidth=3, label=f'Linear Trend ({warming_per_decade:.3f}°C/decade)')
-    plt.plot(valid_data['Year'], valid_data['MA_10yr'], 
-             color='orange', linewidth=2, label='10-year Average')
-    
-    plt.axhline(y=0, color='black', linestyle='--', alpha=0.5)
-    plt.title('Temperature Trend Analysis with Linear Regression', fontsize=14, fontweight='bold')
-    plt.xlabel('Year', fontsize=12)
-    plt.ylabel('Temperature Anomaly (°C)', fontsize=12)
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    
-    plt.savefig('exercise_3_regression.png', dpi=300, bbox_inches='tight')
-    plt.show()
-    
-    print("✅ Exercise 3 Complete!")
-    print("💡 Key Learning: Trends reveal the big picture!")
-    print("   - Moving averages smooth out noise")
-    print("   - Linear regression quantifies trends")
-    print("   - Statistical tests validate findings")
-    print()
-    
-    return df
+    fig.update_layout(
+        title='3D User Risk Segmentation',
+        scene=dict(
+            xaxis_title='Depression Score',
+            yaxis_title='Anxiety Score',
+            zaxis_title='Stress Score'
+        ),
+        height=600
+    )
+    return fig
 
-# ============================================================================
-# EXERCISE 4: ADVANCED VISUALIZATIONS
-# ============================================================================
-
-def exercise_4_advanced_viz(df):
-    """
-    Exercise 4: Create publication-quality visualizations
+def create_wordcloud_analysis(df):
+    """Create word cloud from text data"""
+    all_text = ' '.join(df['text'].values)
     
-    Learning Goals:
-    - Create subplot layouts
-    - Make heatmaps
-    - Add statistical annotations
-    """
-    print("🎨 EXERCISE 4: Advanced Visualizations")
-    print("-" * 50)
+    # Generate word cloud
+    wordcloud = WordCloud(
+        width=800, 
+        height=400,
+        background_color='white',
+        colormap='viridis',
+        max_words=100
+    ).generate(all_text)
     
-    print("📊 Step 1: Create a comprehensive dashboard")
-    
-    # Create a 2x2 subplot layout
-    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-    fig.suptitle('Climate Data Analysis Dashboard', fontsize=16, fontweight='bold')
-    
-    # Plot 1: Time series (top left)
-    ax1 = axes[0, 0]
-    ax1.plot(df['Year'], df['Temperature_Anomaly'], color='blue', alpha=0.7, linewidth=1)
-    ax1.plot(df['Year'], df['MA_10yr'], color='red', linewidth=2, label='10-yr Average')
-    ax1.axhline(y=0, color='black', linestyle='--', alpha=0.5)
-    ax1.set_title('Temperature Anomaly Time Series')
-    ax1.set_xlabel('Year')
-    ax1.set_ylabel('Temperature Anomaly (°C)')
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
-    
-    # Plot 2: Histogram (top right)
-    ax2 = axes[0, 1]
-    ax2.hist(df['Temperature_Anomaly'].dropna(), bins=30, alpha=0.7, color='skyblue', edgecolor='black')
-    ax2.axvline(x=0, color='red', linestyle='--', linewidth=2, label='Zero Anomaly')
-    ax2.axvline(x=df['Temperature_Anomaly'].mean(), color='orange', linestyle='-', linewidth=2, 
-                label=f'Mean ({df["Temperature_Anomaly"].mean():.2f}°C)')
-    ax2.set_title('Distribution of Temperature Anomalies')
-    ax2.set_xlabel('Temperature Anomaly (°C)')
-    ax2.set_ylabel('Frequency')
-    ax2.legend()
-    
-    # Plot 3: Decade comparison (bottom left)
-    ax3 = axes[1, 0]
-    df['Decade'] = (df['Year'] // 10) * 10
-    decade_avg = df.groupby('Decade')['Temperature_Anomaly'].mean()
-    
-    bars = ax3.bar(decade_avg.index, decade_avg.values, 
-                   color=plt.cm.RdYlBu_r(np.linspace(0, 1, len(decade_avg))))
-    ax3.set_title('Average Temperature by Decade')
-    ax3.set_xlabel('Decade')
-    ax3.set_ylabel('Average Temperature Anomaly (°C)')
-    ax3.tick_params(axis='x', rotation=45)
-    
-    # Add value labels on bars
-    for bar, value in zip(bars, decade_avg.values):
-        ax3.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
-                f'{value:.2f}', ha='center', va='bottom', fontsize=9)
-    
-    # Plot 4: Recent focus (bottom right)
-    ax4 = axes[1, 1]
-    recent_data = df[df['Year'] >= 1980]
-    
-    ax4.fill_between(recent_data['Year'], 0, recent_data['Temperature_Anomaly'],
-                     where=(recent_data['Temperature_Anomaly'] >= 0),
-                     color='red', alpha=0.4, label='Above Average')
-    ax4.fill_between(recent_data['Year'], 0, recent_data['Temperature_Anomaly'],
-                     where=(recent_data['Temperature_Anomaly'] < 0),
-                     color='blue', alpha=0.4, label='Below Average')
-    ax4.plot(recent_data['Year'], recent_data['MA_10yr'], 
-             color='black', linewidth=2, label='10-yr Average')
-    
-    ax4.axhline(y=0, color='black', linestyle='-', alpha=0.8)
-    ax4.set_title('Recent Trends (1980-Present)')
-    ax4.set_xlabel('Year')
-    ax4.set_ylabel('Temperature Anomaly (°C)')
-    ax4.legend()
-    ax4.grid(True, alpha=0.3)
-    
+    # Convert to image for streamlit
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.imshow(wordcloud, interpolation='bilinear')
+    ax.axis('off')
     plt.tight_layout()
-    plt.savefig('exercise_4_dashboard.png', dpi=300, bbox_inches='tight')
-    plt.show()
     
-    print("📊 Step 2: Create a temperature heatmap")
-    
-    # Prepare data for heatmap
-    df['Year_Group'] = ((df['Year'] - 1880) // 10) * 10 + 1880
-    df['Year_in_Group'] = df['Year'] - df['Year_Group']
-    
-    # Create pivot table for heatmap
-    heatmap_data = df.pivot_table(values='Temperature_Anomaly',
-                                  index='Year_Group',
-                                  columns='Year_in_Group',
-                                  aggfunc='mean')
-    
-    # Create heatmap
-    plt.figure(figsize=(12, 8))
-    sns.heatmap(heatmap_data, 
-                annot=True, 
-                fmt='.2f', 
-                cmap='RdYlBu_r',
-                center=0,
-                cbar_kws={'label': 'Temperature Anomaly (°C)'})
-    
-    plt.title('Temperature Anomaly Heatmap: Decade Analysis', fontsize=14, fontweight='bold')
-    plt.xlabel('Year in Decade (0-9)')
-    plt.ylabel('Decade Starting Year')
-    
-    plt.tight_layout()
-    plt.savefig('exercise_4_heatmap.png', dpi=300, bbox_inches='tight')
-    plt.show()
-    
-    print("✅ Exercise 4 Complete!")
-    print("💡 Key Learning: Advanced visualizations reveal hidden patterns!")
-    print("   - Subplots allow multiple perspectives")
-    print("   - Heatmaps show two-dimensional patterns")
-    print("   - Color coding enhances understanding")
-    print()
+    return fig
 
-# ============================================================================
-# EXERCISE 5: INTERACTIVE ANALYSIS
-# ============================================================================
-
-def exercise_5_interactive_analysis():
-    """
-    Exercise 5: Practice with real NASA data
+def main():
+    """Main dashboard application"""
     
-    Learning Goals:
-    - Download real data from APIs
-    - Handle API errors gracefully
-    - Compare your analysis with real climate data
-    """
-    print("🌍 EXERCISE 5: Real NASA Data Analysis")
-    print("-" * 50)
+    # Header
+    st.markdown('<h1 class="main-header">🧠 Mental Health AI Analytics Dashboard</h1>', 
+                unsafe_allow_html=True)
+    st.markdown("### Advanced NLP-powered Mental Health Monitoring System")
     
-    print("📡 Step 1: Download real NASA GISS data")
+    # Load data
+    df = load_sample_data()
     
-    try:
-        # Download real NASA data
-        url = "https://data.giss.nasa.gov/gistemp/graphs/graph_data/Global_Mean_Estimates_based_on_Land_and_Ocean_Data/graph.txt"
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
+    # Sidebar controls
+    st.sidebar.header("📊 Dashboard Controls")
+    
+    # Date range filter
+    date_range = st.sidebar.date_input(
+        "Select Analysis Period",
+        value=(df['date'].min().date(), df['date'].max().date()),
+        min_value=df['date'].min().date(),
+        max_value=df['date'].max().date()
+    )
+    
+    # Severity filter
+    severity_options = ['low', 'moderate', 'high', 'critical']
+    selected_severities = st.sidebar.multiselect(
+        "Filter by Severity Level",
+        severity_options,
+        default=severity_options
+    )
+    
+    # User filter
+    user_options = df['user_id'].unique()
+    selected_users = st.sidebar.multiselect(
+        "Filter by Users",
+        user_options,
+        default=user_options[:10]  # Default to first 10 users
+    )
+    
+    # Apply filters
+    mask = (
+        (df['date'].dt.date >= date_range[0]) & 
+        (df['date'].dt.date <= date_range[1]) &
+        (df['severity'].isin(selected_severities)) &
+        (df['user_id'].isin(selected_users))
+    )
+    filtered_df = df[mask]
+    
+    # Real-time simulation toggle
+    real_time = st.sidebar.checkbox("Enable Real-time Simulation", value=False)
+    
+    if real_time:
+        # Auto-refresh every 5 seconds
+        time.sleep(1)
+        st.rerun()
+    
+    # Key Metrics Row
+    st.markdown("## 📈 Key Performance Indicators")
+    col1, col2, col3, col4, col5 = st.columns(5)
+    
+    with col1:
+        total_analyses = len(filtered_df)
+        st.metric("Total Analyses", total_analyses, delta=f"+{np.random.randint(5, 15)}")
+    
+    with col2:
+        avg_depression = filtered_df['depression_score'].mean()
+        prev_depression = avg_depression + np.random.uniform(-0.1, 0.1)
+        st.metric("Avg Depression", f"{avg_depression:.2f}", 
+                 delta=f"{avg_depression - prev_depression:.2f}")
+    
+    with col3:
+        avg_anxiety = filtered_df['anxiety_score'].mean()
+        prev_anxiety = avg_anxiety + np.random.uniform(-0.1, 0.1)
+        st.metric("Avg Anxiety", f"{avg_anxiety:.2f}", 
+                 delta=f"{avg_anxiety - prev_anxiety:.2f}")
+    
+    with col4:
+        high_risk_count = len(filtered_df[filtered_df['severity'].isin(['high', 'critical'])])
+        st.metric("High Risk Cases", high_risk_count, 
+                 delta=f"+{np.random.randint(0, 5)}")
+    
+    with col5:
+        avg_confidence = filtered_df['confidence'].mean()
+        st.metric("Avg Confidence", f"{avg_confidence:.2f}",
+                 delta=f"+{np.random.uniform(0, 0.05):.2f}")
+    
+    # Alert System
+    critical_cases = len(filtered_df[filtered_df['severity'] == 'critical'])
+    if critical_cases > 0:
+        st.markdown(f'<div class="alert-high">🚨 ALERT: {critical_cases} critical cases detected requiring immediate attention!</div>', 
+                   unsafe_allow_html=True)
+    
+    high_cases = len(filtered_df[filtered_df['severity'] == 'high'])
+    if high_cases > 5:
+        st.markdown(f'<div class="alert-moderate">⚠️ WARNING: {high_cases} high-risk cases detected</div>', 
+                   unsafe_allow_html=True)
+    
+    # Main Dashboard Tabs
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📊 Overview", "📈 Time Series", "👥 User Analysis", 
+        "🔍 Text Analysis", "🎯 Predictions", "⚙️ Model Performance"
+    ])
+    
+    with tab1:
+        st.header("Dashboard Overview")
         
-        # Parse the data
-        lines = response.text.strip().split('\n')
-        years, temps = [], []
+        col1, col2 = st.columns(2)
         
-        for line in lines:
-            if line.strip() and not line.startswith('*') and not line.startswith('#'):
-                parts = line.split()
-                if len(parts) >= 2:
-                    try:
-                        year = int(parts[0])
-                        temp = float(parts[1])
-                        years.append(year)
-                        temps.append(temp)
-                    except ValueError:
-                        continue
+        with col1:
+            # Severity distribution
+            severity_counts = filtered_df['severity'].value_counts()
+            fig_severity = px.pie(
+                values=severity_counts.values,
+                names=severity_counts.index,
+                title="Mental Health Severity Distribution",
+                color_discrete_map={
+                    'low': '#90EE90',
+                    'moderate': '#FFD700', 
+                    'high': '#FF8C00',
+                    'critical': '#FF4500'
+                }
+            )
+            fig_severity.update_traces(textposition='inside', textinfo='percent+label')
+            st.plotly_chart(fig_severity, use_container_width=True)
         
-        real_data = pd.DataFrame({
-            'Year': years,
-            'Temperature_Anomaly': temps
+        with col2:
+            # Gauge charts for current levels
+            current_depression = filtered_df['depression_score'].iloc[-1] if len(filtered_df) > 0 else 0.5
+            fig_gauge = create_severity_gauge(current_depression, "Current Depression Level")
+            st.plotly_chart(fig_gauge, use_container_width=True)
+        
+        # Correlation heatmap
+        st.subheader("Mental Health Metrics Correlation")
+        fig_heatmap = create_heatmap_analysis(filtered_df)
+        st.plotly_chart(fig_heatmap, use_container_width=True)
+    
+    with tab2:
+        st.header("Time Series Analysis")
+        
+        # Advanced time series
+        fig_timeseries = create_time_series_analysis(filtered_df)
+        st.plotly_chart(fig_timeseries, use_container_width=True)
+        
+        # Daily patterns
+        st.subheader("Daily Patterns Analysis")
+        filtered_df['hour'] = filtered_df['date'].dt.hour
+        filtered_df['day_of_week'] = filtered_df['date'].dt.day_name()
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            hourly_risk = filtered_df.groupby('hour')[['depression_score', 'anxiety_score', 'stress_score']].mean()
+            fig_hourly = px.line(
+                hourly_risk.reset_index(), 
+                x='hour', 
+                y=['depression_score', 'anxiety_score', 'stress_score'],
+                title="Risk Levels by Hour of Day"
+            )
+            st.plotly_chart(fig_hourly, use_container_width=True)
+        
+        with col2:
+            daily_risk = filtered_df.groupby('day_of_week')[['depression_score', 'anxiety_score', 'stress_score']].mean()
+            fig_daily = px.bar(
+                daily_risk.reset_index(), 
+                x='day_of_week', 
+                y=['depression_score', 'anxiety_score', 'stress_score'],
+                title="Average Risk by Day of Week",
+                barmode='group'
+            )
+            st.plotly_chart(fig_daily, use_container_width=True)
+    
+    with tab3:
+        st.header("User Segmentation & Risk Analysis")
+        
+        # 3D user segmentation
+        fig_3d = create_user_segmentation(filtered_df)
+        st.plotly_chart(fig_3d, use_container_width=True)
+        
+        # User risk ranking
+        st.subheader("High-Risk User Identification")
+        user_risk = filtered_df.groupby('user_id').agg({
+            'depression_score': 'mean',
+            'anxiety_score': 'mean',
+            'stress_score': 'mean',
+            'confidence': 'mean'
+        }).reset_index()
+        
+        user_risk['overall_risk'] = (user_risk['depression_score'] + 
+                                   user_risk['anxiety_score'] + 
+                                   user_risk['stress_score']) / 3
+        
+        user_risk = user_risk.sort_values('overall_risk', ascending=False)
+        
+        # Format the dataframe for display
+        display_df = user_risk.head(10).copy()
+        for col in ['depression_score', 'anxiety_score', 'stress_score', 'overall_risk', 'confidence']:
+            display_df[col] = display_df[col].round(3)
+        
+        st.dataframe(
+            display_df,
+            column_config={
+                "user_id": "User ID",
+                "depression_score": st.column_config.ProgressColumn(
+                    "Depression",
+                    help="Depression risk score",
+                    min_value=0,
+                    max_value=1,
+                ),
+                "anxiety_score": st.column_config.ProgressColumn(
+                    "Anxiety", 
+                    help="Anxiety risk score",
+                    min_value=0,
+                    max_value=1,
+                ),
+                "stress_score": st.column_config.ProgressColumn(
+                    "Stress",
+                    help="Stress risk score", 
+                    min_value=0,
+                    max_value=1,
+                ),
+                "overall_risk": st.column_config.ProgressColumn(
+                    "Overall Risk",
+                    help="Combined risk score",
+                    min_value=0,
+                    max_value=1,
+                ),
+            },
+            hide_index=True,
+            use_container_width=True
+        )
+    
+    with tab4:
+        st.header("Text Analysis & Insights")
+        
+        # Word cloud
+        st.subheader("Most Common Terms")
+        fig_wordcloud = create_wordcloud_analysis(filtered_df)
+        st.pyplot(fig_wordcloud)
+        
+        # Sentiment distribution
+        st.subheader("Sentiment Analysis")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Text length analysis
+            filtered_df['text_length'] = filtered_df['text'].str.len()
+            fig_length = px.histogram(
+                filtered_df, 
+                x='text_length', 
+                color='severity',
+                title="Text Length Distribution by Severity"
+            )
+            st.plotly_chart(fig_length, use_container_width=True)
+        
+        with col2:
+            # Most concerning texts
+            st.subheader("Highest Risk Texts")
+            high_risk_texts = filtered_df.nlargest(5, 'depression_score')[['text', 'depression_score', 'severity']]
+            for idx, row in high_risk_texts.iterrows():
+                st.markdown(f"**Risk Score: {row['depression_score']:.3f}** ({row['severity']})")
+                st.markdown(f"_{row['text'][:100]}..._")
+                st.markdown("---")
+    
+    with tab5:
+        st.header("Live Prediction Interface")
+        
+        # Text input for real-time analysis
+        st.subheader("Analyze New Text")
+        user_input = st.text_area(
+            "Enter text to analyze:",
+            placeholder="Type or paste text here for mental health analysis...",
+            height=100
+        )
+        
+        if st.button("Analyze Text", type="primary"):
+            if user_input:
+                # Initialize system and get prediction
+                system = MentalHealthAnalyzerSystem()
+                prediction = system.analyze_single_text(user_input)
+                
+                # Display results
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric("Depression Risk", f"{prediction.depression_score:.3f}")
+                with col2:
+                    st.metric("Anxiety Risk", f"{prediction.anxiety_score:.3f}")
+                with col3:
+                    st.metric("Stress Risk", f"{prediction.stress_score:.3f}")
+                
+                # Severity and recommendations
+                severity_color = {
+                    'low': '🟢', 'moderate': '🟡', 'high': '🟠', 'critical': '🔴'
+                }
+                
+                st.markdown(f"### {severity_color.get(prediction.overall_severity.value, '⚪')} Severity: {prediction.overall_severity.value.title()}")
+                st.markdown(f"**Confidence:** {prediction.confidence:.1%}")
+                
+                # Recommendations
+                st.subheader("🎯 Recommendations")
+                for i, rec in enumerate(prediction.recommendations, 1):
+                    st.markdown(f"{i}. {rec}")
+            else:
+                st.warning("Please enter some text to analyze.")
+    
+    with tab6:
+        st.header("Model Performance Metrics")
+        
+        # Simulate model performance metrics
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("Model Accuracy", "94.2%", delta="2.1%")
+        with col2:
+            st.metric("Precision", "91.8%", delta="1.5%")
+        with col3:
+            st.metric("Recall", "89.3%", delta="-0.8%")
+        
+        # Performance over time
+        performance_dates = pd.date_range(start='2024-01-01', end='2024-12-31', freq='W')
+        performance_data = pd.DataFrame({
+            'date': performance_dates,
+            'accuracy': np.random.uniform(0.85, 0.95, len(performance_dates)),
+            'precision': np.random.uniform(0.82, 0.93, len(performance_dates)),
+            'recall': np.random.uniform(0.80, 0.91, len(performance_dates))
         })
         
-        print(f"✅ Successfully downloaded {len(real_data)} years of NASA data!")
-        print(f"Data range: {real_data['Year'].min()} - {real_data['Year'].max()}")
+        fig_performance = px.line(
+            performance_data, 
+            x='date', 
+            y=['accuracy', 'precision', 'recall'],
+            title="Model Performance Over Time",
+            labels={'value': 'Score', 'variable': 'Metric'}
+        )
+        st.plotly_chart(fig_performance, use_container_width=True)
         
-        # Quick analysis of real data
-        recent_trend = real_data[real_data['Year'] >= 1980]['Temperature_Anomaly'].mean()
-        print(f"Recent average (1980+): {recent_trend:.3f}°C")
+        # Feature importance
+        st.subheader("Feature Importance Analysis")
+        features = ['Sentiment Score', 'Text Length', 'Keyword Count', 'Emotional Tone', 
+                   'Linguistic Complexity', 'Previous History', 'Time of Day', 'Social Context']
+        importance = np.random.uniform(0.05, 0.25, len(features))
+        importance = importance / importance.sum()  # Normalize
         
-        # Create a quick visualization
-        plt.figure(figsize=(12, 6))
-        plt.plot(real_data['Year'], real_data['Temperature_Anomaly'], 
-                 color='blue', linewidth=1.5, alpha=0.8)
-        plt.axhline(y=0, color='black', linestyle='--', alpha=0.5)
-        plt.title('Real NASA GISS Global Temperature Anomalies', fontsize=14, fontweight='bold')
-        plt.xlabel('Year')
-        plt.ylabel('Temperature Anomaly (°C)')
-        plt.grid(True, alpha=0.3)
-        
-        # Highlight recent warming
-        recent_data = real_data[real_data['Year'] >= 2000]
-        plt.plot(recent_data['Year'], recent_data['Temperature_Anomaly'], 
-                 color='red', linewidth=2, label='21st Century')
-        plt.legend()
-        
-        plt.savefig('exercise_5_real_nasa_data.png', dpi=300, bbox_inches='tight')
-        plt.show()
-        
-        print("🎉 Congratulations! You've analyzed real climate data!")
-        
-    except Exception as e:
-        print(f"❌ Could not download real data: {e}")
-        print("💡 This is normal - APIs can be unreliable!")
-        print("In real projects, always have backup plans.")
+        fig_importance = px.bar(
+            x=importance, 
+            y=features,
+            orientation='h',
+            title="Feature Importance in Mental Health Prediction"
+        )
+        fig_importance.update_layout(yaxis={'categoryorder':'total ascending'})
+        st.plotly_chart(fig_importance, use_container_width=True)
     
-    print("\n✅ Exercise 5 Complete!")
-    print("💡 Key Learning: Real-world data analysis involves:")
-    print("   - Handling network errors gracefully")
-    print("   - Parsing various data formats")
-    print("   - Validating data quality")
-    print()
-
-# ============================================================================
-# MAIN LEARNING PROGRAM
-# ============================================================================
-
-def run_learning_program():
-    """
-    Run the complete learning program
-    """
-    print("🎓 CLIMATE DATA ANALYSIS BOOTCAMP")
-    print("=" * 55)
-    print("Learn professional climate data analysis step by step!")
-    print()
-    
-    # Exercise 1: Data Exploration
-    df = exercise_1_data_exploration()
-    
-    input("Press Enter to continue to Exercise 2...")
-    
-    # Exercise 2: Basic Plotting
-    df_clean = exercise_2_basic_plotting(df)
-    
-    input("Press Enter to continue to Exercise 3...")
-    
-    # Exercise 3: Trend Analysis
-    df_processed = exercise_3_trend_analysis(df_clean)
-    
-    input("Press Enter to continue to Exercise 4...")
-    
-    # Exercise 4: Advanced Visualizations
-    exercise_4_advanced_viz(df_processed)
-    
-    input("Press Enter to continue to Exercise 5...")
-    
-    # Exercise 5: Real Data Analysis
-    exercise_5_interactive_analysis()
-    
-    print("\n🎉 CONGRATULATIONS!")
-    print("=" * 55)
-    print("You've completed the Climate Data Analysis Bootcamp!")
-    print()
-    print("🏆 Skills You've Mastered:")
-    print("   ✅ Data loading and exploration")
-    print("   ✅ Basic and advanced visualization")
-    print("   ✅ Statistical trend analysis")
-    print("   ✅ Professional plot creation")
-    print("   ✅ Real-world data handling")
-    print()
-    print("🚀 Next Steps:")
-    print("   • Try the full climate_visualizer.py script")
-    print("   • Experiment with different datasets")
-    print("   • Create your own analysis projects")
-    print("   • Share your visualizations!")
+    # Footer
+    st.markdown("---")
+    st.markdown("""
+    <div style='text-align: center; color: #666;'>
+        🧠 AI Mental Health Analyzer | Built with Advanced NLP & Machine Learning<br>
+        <small>For demonstration purposes only. Not a substitute for professional medical advice.</small>
+    </div>
+    """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
-    run_learning_program()
+    main()
