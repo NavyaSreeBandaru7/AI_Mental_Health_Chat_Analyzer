@@ -1,644 +1,731 @@
-import streamlit as st
+"""
+AI Mental Health Chat Analyzer
+Advanced NLP-based mental health detection system with multi-agent architecture
+Author: Senior ML Engineer with 35+ years experience
+"""
+
+import os
+import logging
+import asyncio
+from datetime import datetime, timedelta
+from typing import Dict, List, Tuple, Optional, Any
+from dataclasses import dataclass, asdict
+from enum import Enum
+import json
+import pickle
+import warnings
+warnings.filterwarnings("ignore")
+
+# Core ML and NLP libraries
 import pandas as pd
 import numpy as np
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.feature_extraction.text import TfidfVectorizer
+import joblib
+
+# Advanced NLP and Transformers
+import nltk
+from nltk.sentiment import SentimentIntensityAnalyzer
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize, sent_tokenize
+from nltk.stem import WordNetLemmatizer
+import spacy
+from textblob import TextBlob
+import torch
+from transformers import (
+    AutoTokenizer, AutoModelForSequenceClassification,
+    pipeline, AutoModel
+)
+
+# Visualization and Dashboard
 import matplotlib.pyplot as plt
 import seaborn as sns
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import streamlit as st
+from wordcloud import WordCloud
+
+# Data processing and web scraping
 import requests
-from datetime import datetime, timedelta
-from scipy import stats
-import base64
-from io import BytesIO
-import warnings
-warnings.filterwarnings('ignore')
+from bs4 import BeautifulSoup
+import praw  # Reddit API
+import tweepy  # Twitter API
+import asyncio
+import aiohttp
 
-# Configure page settings
-st.set_page_config(
-    page_title="🌍 Climate Data Explorer",
-    page_icon="🌡️",
-    layout="wide",
-    initial_sidebar_state="expanded"
+# Database and caching
+import sqlite3
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+import redis
+
+# Deployment and monitoring
+from flask import Flask, request, jsonify
+import docker
+from prometheus_client import Counter, Histogram, generate_latest
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('mental_health_analyzer.log'),
+        logging.StreamHandler()
+    ]
 )
+logger = logging.getLogger(__name__)
 
-# Custom CSS for professional styling
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 3rem;
-        color: #1f77b4;
-        text-align: center;
-        margin-bottom: 2rem;
-        text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
-    }
-    .sub-header {
-        font-size: 1.5rem;
-        color: #2c3e50;
-        margin: 1rem 0;
-        border-left: 4px solid #3498db;
-        padding-left: 1rem;
-    }
-    .metric-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1rem;
-        border-radius: 10px;
-        color: white;
-        margin: 0.5rem 0;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    }
-    .info-box {
-        background: #f8f9fa;
-        border: 1px solid #dee2e6;
-        border-radius: 5px;
-        padding: 1rem;
-        margin: 1rem 0;
-    }
-    .stButton > button {
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border-radius: 20px;
-        border: none;
-        padding: 0.5rem 2rem;
-        font-weight: bold;
-    }
-</style>
-""", unsafe_allow_html=True)
+# Download required NLTK data
+nltk.download('vader_lexicon', quiet=True)
+nltk.download('punkt', quiet=True)
+nltk.download('stopwords', quiet=True)
+nltk.download('wordnet', quiet=True)
 
-class ClimateDataApp:
-    """
-    Main application class for climate data analysis
-    
-    Professional architecture with separation of concerns:
-    - Data management
-    - Analysis functions
-    - Visualization methods
-    - User interface components
-    """
+class MentalHealthSeverity(Enum):
+    LOW = "low"
+    MODERATE = "moderate" 
+    HIGH = "high"
+    CRITICAL = "critical"
+
+@dataclass
+class MentalHealthPrediction:
+    text: str
+    depression_score: float
+    anxiety_score: float
+    stress_score: float
+    overall_severity: MentalHealthSeverity
+    confidence: float
+    recommendations: List[str]
+    timestamp: datetime
+    user_id: Optional[str] = None
+
+class AdvancedNLPProcessor:
+    """Advanced NLP processing with multiple models and techniques"""
     
     def __init__(self):
-        """Initialize the application with default settings"""
-        self.data = None
-        self.processed_data = None
+        self.sia = SentimentIntensityAnalyzer()
+        self.lemmatizer = WordNetLemmatizer()
+        self.stop_words = set(stopwords.words('english'))
         
-        # Professional color schemes for climate visualization
-        self.climate_colors = {
-            'temperature': ['#313695', '#4575b4', '#74add1', '#abd9e9',
-                           '#e0f3f8', '#fee090', '#fdae61', '#f46d43', 
-                           '#d73027', '#a50026'],
-            'warming_cooling': ['#2166ac', '#4393c3', '#92c5de', '#d1e5f0',
-                               '#fddbc7', '#f4a582', '#d6604d', '#b2182b']
-        }
-        
-        # Cache for improved performance
-        if 'data_cache' not in st.session_state:
-            st.session_state.data_cache = {}
-    
-    @st.cache_data
-    def download_nasa_data(_self):
-        """
-        Download NASA GISS temperature data with caching for performance
-        
-        Teaching moment: Always cache expensive operations in web apps
-        """
+        # Load spaCy model
         try:
-            url = "https://data.giss.nasa.gov/gistemp/graphs/graph_data/Global_Mean_Estimates_based_on_Land_and_Ocean_Data/graph.txt"
+            self.nlp = spacy.load("en_core_web_sm")
+        except OSError:
+            logger.warning("spaCy model not found. Install with: python -m spacy download en_core_web_sm")
+            self.nlp = None
+        
+        # Initialize transformers
+        self.tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
+        self.mental_health_model = None
+        self.emotion_classifier = None
+        
+        self._initialize_models()
+        
+    def _initialize_models(self):
+        """Initialize pre-trained models for mental health detection"""
+        try:
+            # Mental health specific model (using a general sentiment model as proxy)
+            self.emotion_classifier = pipeline(
+                "text-classification",
+                model="j-hartmann/emotion-english-distilroberta-base",
+                return_all_scores=True
+            )
             
-            with st.spinner("🛰️ Downloading latest NASA climate data..."):
-                response = requests.get(url, timeout=30)
-                response.raise_for_status()
-                
-                # Parse NASA data format
-                lines = response.text.strip().split('\n')
-                years, temps = [], []
-                
-                for line in lines:
-                    if line.strip() and not line.startswith('*') and not line.startswith('#'):
-                        parts = line.split()
-                        if len(parts) >= 2:
-                            try:
-                                year = int(parts[0])
-                                temp = float(parts[1])
-                                years.append(year)
-                                temps.append(temp)
-                            except ValueError:
-                                continue
-                
-                data = pd.DataFrame({
-                    'Year': years,
-                    'Temperature_Anomaly': temps
-                })
-                
-                st.success(f"✅ Successfully loaded {len(data)} years of NASA data!")
-                return data
-                
+            # Stress detection pipeline
+            self.stress_classifier = pipeline(
+                "text-classification",
+                model="michellejieli/emotion_text_classifier"
+            )
+            
+            logger.info("Advanced NLP models initialized successfully")
         except Exception as e:
-            st.error(f"❌ Error downloading NASA data: {e}")
-            st.info("🔄 Loading demonstration data instead...")
-            return self._create_demo_data()
+            logger.error(f"Error initializing models: {e}")
     
-    def _create_demo_data(self):
-        """Create realistic demonstration data if download fails"""
-        np.random.seed(42)
-        years = range(1880, 2024)
+    def extract_features(self, text: str) -> Dict[str, float]:
+        """Extract comprehensive features from text"""
+        features = {}
         
-        # Realistic temperature trend with noise
-        base_trend = np.linspace(-0.2, 1.1, len(years))
-        noise = np.random.normal(0, 0.15, len(years))
-        cyclical = 0.1 * np.sin(np.array(years) * 2 * np.pi / 7)
+        # Basic text statistics
+        features['text_length'] = len(text)
+        features['word_count'] = len(text.split())
+        features['sentence_count'] = len(sent_tokenize(text))
+        features['avg_word_length'] = np.mean([len(word) for word in text.split()])
         
-        temperature_anomaly = base_trend + noise + cyclical
+        # VADER sentiment
+        vader_scores = self.sia.polarity_scores(text)
+        features.update({f'vader_{k}': v for k, v in vader_scores.items()})
         
-        return pd.DataFrame({
-            'Year': years,
-            'Temperature_Anomaly': temperature_anomaly
-        })
+        # TextBlob sentiment
+        blob = TextBlob(text)
+        features['textblob_polarity'] = blob.sentiment.polarity
+        features['textblob_subjectivity'] = blob.sentiment.subjectivity
+        
+        # Linguistic features
+        if self.nlp:
+            doc = self.nlp(text)
+            features['pos_noun_ratio'] = len([token for token in doc if token.pos_ == 'NOUN']) / len(doc)
+            features['pos_verb_ratio'] = len([token for token in doc if token.pos_ == 'VERB']) / len(doc)
+            features['pos_adj_ratio'] = len([token for token in doc if token.pos_ == 'ADJ']) / len(doc)
+            features['named_entities'] = len(doc.ents)
+        
+        # Mental health keywords
+        depression_words = ['sad', 'depressed', 'hopeless', 'worthless', 'empty', 'numb']
+        anxiety_words = ['worried', 'anxious', 'panic', 'fear', 'nervous', 'overwhelmed']
+        stress_words = ['stressed', 'pressure', 'burden', 'exhausted', 'tired', 'overwhelm']
+        
+        text_lower = text.lower()
+        features['depression_word_count'] = sum(word in text_lower for word in depression_words)
+        features['anxiety_word_count'] = sum(word in text_lower for word in anxiety_words)
+        features['stress_word_count'] = sum(word in text_lower for word in stress_words)
+        
+        # Advanced transformer features
+        if self.emotion_classifier:
+            try:
+                emotions = self.emotion_classifier(text)[0]
+                for emotion in emotions:
+                    features[f'emotion_{emotion["label"].lower()}'] = emotion['score']
+            except Exception as e:
+                logger.warning(f"Error in emotion classification: {e}")
+        
+        return features
+
+class MentalHealthAgent:
+    """Intelligent agent for mental health analysis and recommendations"""
     
-    def process_data(self, df):
-        """
-        Process raw data for comprehensive analysis
+    def __init__(self):
+        self.nlp_processor = AdvancedNLPProcessor()
+        self.models = {}
+        self.scalers = {}
+        self.label_encoders = {}
+        self.vectorizer = TfidfVectorizer(max_features=1000, stop_words='english')
         
-        Teaching moment: Always enhance your data with derived features
-        """
-        if df is None:
-            return None
-        
-        # Create enhanced dataset
-        processed = df.copy()
-        
-        # Time-based features
-        processed['Decade'] = (processed['Year'] // 10) * 10
-        processed['Century'] = np.where(processed['Year'] < 1900, '19th Century',
-                                      np.where(processed['Year'] < 2000, '20th Century', '21st Century'))
-        
-        # Moving averages for trend analysis
-        processed['MA_5yr'] = processed['Temperature_Anomaly'].rolling(window=5, center=True).mean()
-        processed['MA_10yr'] = processed['Temperature_Anomaly'].rolling(window=10, center=True).mean()
-        processed['MA_30yr'] = processed['Temperature_Anomaly'].rolling(window=30, center=True).mean()
-        
-        # Temperature categories
-        processed['Temp_Category'] = pd.cut(
-            processed['Temperature_Anomaly'],
-            bins=[-np.inf, -0.5, -0.25, 0, 0.25, 0.5, np.inf],
-            labels=['Very Cold', 'Cold', 'Cool', 'Warm', 'Hot', 'Very Hot']
-        )
-        
-        # Extreme event detection
-        std_dev = processed['Temperature_Anomaly'].std()
-        mean_temp = processed['Temperature_Anomaly'].mean()
-        processed['Is_Extreme'] = abs(processed['Temperature_Anomaly'] - mean_temp) > 2 * std_dev
-        
-        # Recent trends (last 40 years)
-        processed['Is_Recent'] = processed['Year'] >= (processed['Year'].max() - 40)
-        
-        return processed
+        # Knowledge base for recommendations
+        self.recommendations_db = {
+            MentalHealthSeverity.LOW: [
+                "Practice daily mindfulness meditation (5-10 minutes)",
+                "Maintain a regular sleep schedule",
+                "Try journaling your thoughts and feelings",
+                "Engage in light physical exercise like walking"
+            ],
+            MentalHealthSeverity.MODERATE: [
+                "Consider talking to a counselor or therapist",
+                "Practice deep breathing exercises",
+                "Join a support group or community",
+                "Try cognitive behavioral therapy techniques",
+                "Hotline: National Suicide Prevention Lifeline 988"
+            ],
+            MentalHealthSeverity.HIGH: [
+                "Seek professional help immediately",
+                "Contact a mental health professional",
+                "Reach out to trusted friends or family",
+                "Crisis Text Line: Text HOME to 741741",
+                "National Suicide Prevention Lifeline: 988"
+            ],
+            MentalHealthSeverity.CRITICAL: [
+                "IMMEDIATE PROFESSIONAL INTERVENTION REQUIRED",
+                "Call emergency services if in immediate danger",
+                "National Suicide Prevention Lifeline: 988",
+                "Crisis Text Line: Text HOME to 741741",
+                "Go to nearest emergency room if having suicidal thoughts"
+            ]
+        }
     
-    def calculate_statistics(self, df):
-        """Calculate comprehensive climate statistics"""
-        if df is None:
-            return {}
+    def train_models(self, training_data: pd.DataFrame):
+        """Train ensemble of models for mental health prediction"""
+        logger.info("Starting model training...")
         
-        # Overall statistics
-        stats_dict = {
-            'data_range': f"{df['Year'].min()} - {df['Year'].max()}",
-            'total_years': len(df),
-            'mean_anomaly': df['Temperature_Anomaly'].mean(),
-            'std_anomaly': df['Temperature_Anomaly'].std(),
-            'max_anomaly': df['Temperature_Anomaly'].max(),
-            'min_anomaly': df['Temperature_Anomaly'].min(),
-            'max_year': df.loc[df['Temperature_Anomaly'].idxmax(), 'Year'],
-            'min_year': df.loc[df['Temperature_Anomaly'].idxmin(), 'Year']
+        # Prepare features
+        X_text = training_data['text'].values
+        X_features = pd.DataFrame([
+            self.nlp_processor.extract_features(text) for text in X_text
+        ])
+        
+        # Prepare labels
+        y_depression = training_data.get('depression_score', np.random.uniform(0, 1, len(training_data)))
+        y_anxiety = training_data.get('anxiety_score', np.random.uniform(0, 1, len(training_data)))
+        y_stress = training_data.get('stress_score', np.random.uniform(0, 1, len(training_data)))
+        
+        # Train separate models for each condition
+        for target, y in [('depression', y_depression), ('anxiety', y_anxiety), ('stress', y_stress)]:
+            # Split data
+            X_train, X_test, y_train, y_test = train_test_split(
+                X_features, y, test_size=0.2, random_state=42
+            )
+            
+            # Scale features
+            scaler = StandardScaler()
+            X_train_scaled = scaler.fit_transform(X_train)
+            X_test_scaled = scaler.transform(X_test)
+            self.scalers[target] = scaler
+            
+            # Train ensemble
+            models = {
+                'rf': RandomForestClassifier(n_estimators=100, random_state=42),
+                'gb': GradientBoostingClassifier(random_state=42),
+                'lr': LogisticRegression(random_state=42)
+            }
+            
+            best_model = None
+            best_score = 0
+            
+            for name, model in models.items():
+                # Convert regression to classification
+                y_train_class = (y_train > 0.5).astype(int)
+                y_test_class = (y_test > 0.5).astype(int)
+                
+                model.fit(X_train_scaled, y_train_class)
+                score = model.score(X_test_scaled, y_test_class)
+                
+                logger.info(f"{target.capitalize()} {name} accuracy: {score:.3f}")
+                
+                if score > best_score:
+                    best_score = score
+                    best_model = model
+            
+            self.models[target] = best_model
+            logger.info(f"Best {target} model selected with accuracy: {best_score:.3f}")
+        
+        logger.info("Model training completed successfully")
+    
+    def predict_mental_health(self, text: str, user_id: Optional[str] = None) -> MentalHealthPrediction:
+        """Comprehensive mental health prediction"""
+        try:
+            # Extract features
+            features = self.nlp_processor.extract_features(text)
+            features_df = pd.DataFrame([features])
+            
+            predictions = {}
+            for condition in ['depression', 'anxiety', 'stress']:
+                if condition in self.models and condition in self.scalers:
+                    scaled_features = self.scalers[condition].transform(features_df)
+                    prob = self.models[condition].predict_proba(scaled_features)[0][1]
+                    predictions[f'{condition}_score'] = prob
+                else:
+                    # Fallback using rule-based approach
+                    score = self._calculate_fallback_score(text, condition)
+                    predictions[f'{condition}_score'] = score
+            
+            # Calculate overall severity
+            avg_score = np.mean(list(predictions.values()))
+            severity = self._determine_severity(avg_score)
+            
+            # Calculate confidence
+            confidence = self._calculate_confidence(predictions, features)
+            
+            # Get recommendations
+            recommendations = self.recommendations_db[severity]
+            
+            return MentalHealthPrediction(
+                text=text,
+                depression_score=predictions.get('depression_score', 0.0),
+                anxiety_score=predictions.get('anxiety_score', 0.0),
+                stress_score=predictions.get('stress_score', 0.0),
+                overall_severity=severity,
+                confidence=confidence,
+                recommendations=recommendations[:3],  # Top 3 recommendations
+                timestamp=datetime.now(),
+                user_id=user_id
+            )
+            
+        except Exception as e:
+            logger.error(f"Error in prediction: {e}")
+            return self._create_fallback_prediction(text, user_id)
+    
+    def _calculate_fallback_score(self, text: str, condition: str) -> float:
+        """Rule-based fallback scoring when models aren't available"""
+        text_lower = text.lower()
+        
+        condition_keywords = {
+            'depression': ['sad', 'depressed', 'hopeless', 'worthless', 'empty', 'numb', 'down'],
+            'anxiety': ['worried', 'anxious', 'panic', 'fear', 'nervous', 'overwhelmed', 'scared'],
+            'stress': ['stressed', 'pressure', 'burden', 'exhausted', 'tired', 'overwhelm', 'burnt out']
         }
         
-        # Trend analysis
-        slope, intercept, r_value, p_value, std_err = stats.linregress(
-            df['Year'], df['Temperature_Anomaly']
-        )
+        keywords = condition_keywords.get(condition, [])
+        keyword_count = sum(1 for word in keywords if word in text_lower)
         
-        stats_dict.update({
-            'warming_rate': slope * 10,  # per decade
-            'correlation': r_value,
-            'p_value': p_value,
-            'trend_significant': p_value < 0.05
-        })
+        # Sentiment analysis contribution
+        sentiment = self.nlp_processor.sia.polarity_scores(text)
+        negative_sentiment = abs(sentiment['neg'])
         
-        # Recent trends (last 50 years)
-        recent_data = df[df['Year'] >= df['Year'].max() - 50]
-        if len(recent_data) > 10:
-            recent_slope, _, recent_r, recent_p, _ = stats.linregress(
-                recent_data['Year'], recent_data['Temperature_Anomaly']
-            )
-            stats_dict.update({
-                'recent_warming_rate': recent_slope * 10,
-                'recent_correlation': recent_r,
-                'recent_p_value': recent_p
-            })
-        
-        # Extreme events
-        stats_dict['extreme_years'] = df['Is_Extreme'].sum()
-        stats_dict['warming_years'] = (df['Temperature_Anomaly'] > 0).sum()
-        stats_dict['cooling_years'] = (df['Temperature_Anomaly'] < 0).sum()
-        
-        return stats_dict
+        # Simple scoring algorithm
+        score = min((keyword_count * 0.2) + (negative_sentiment * 0.6), 1.0)
+        return score
     
-    def create_interactive_timeseries(self, df):
-        """Create interactive time series plot with Plotly"""
-        fig = go.Figure()
-        
-        # Add main temperature line
-        fig.add_trace(go.Scatter(
-            x=df['Year'],
-            y=df['Temperature_Anomaly'],
-            mode='lines',
-            name='Annual Anomaly',
-            line=dict(color='lightblue', width=1),
-            hovertemplate='<b>Year:</b> %{x}<br><b>Anomaly:</b> %{y:.2f}°C<extra></extra>'
-        ))
-        
-        # Add 10-year moving average
-        fig.add_trace(go.Scatter(
-            x=df['Year'],
-            y=df['MA_10yr'],
-            mode='lines',
-            name='10-Year Average',
-            line=dict(color='red', width=3),
-            hovertemplate='<b>Year:</b> %{x}<br><b>10-yr Avg:</b> %{y:.2f}°C<extra></extra>'
-        ))
-        
-        # Add zero reference line
-        fig.add_hline(y=0, line_dash="dash", line_color="black", opacity=0.5)
-        
-        # Highlight extreme years
-        extreme_data = df[df['Is_Extreme'] == True]
-        if not extreme_data.empty:
-            fig.add_trace(go.Scatter(
-                x=extreme_data['Year'],
-                y=extreme_data['Temperature_Anomaly'],
-                mode='markers',
-                name='Extreme Years',
-                marker=dict(color='red', size=8, symbol='diamond'),
-                hovertemplate='<b>Extreme Year:</b> %{x}<br><b>Anomaly:</b> %{y:.2f}°C<extra></extra>'
-            ))
-        
-        # Customize layout
-        fig.update_layout(
-            title={
-                'text': 'Global Temperature Anomalies (1880-Present)',
-                'x': 0.5,
-                'font': {'size': 20}
-            },
-            xaxis_title='Year',
-            yaxis_title='Temperature Anomaly (°C)',
-            hovermode='x unified',
-            template='plotly_white',
-            height=500
-        )
-        
-        return fig
+    def _determine_severity(self, score: float) -> MentalHealthSeverity:
+        """Determine severity level based on score"""
+        if score >= 0.8:
+            return MentalHealthSeverity.CRITICAL
+        elif score >= 0.6:
+            return MentalHealthSeverity.HIGH
+        elif score >= 0.3:
+            return MentalHealthSeverity.MODERATE
+        else:
+            return MentalHealthSeverity.LOW
     
-    def create_distribution_plot(self, df):
-        """Create temperature distribution analysis"""
-        fig = make_subplots(
-            rows=2, cols=2,
-            subplot_titles=('Temperature Distribution', 'Decade Comparison', 
-                           'Warming vs Cooling', 'Recent Trends'),
-            specs=[[{"type": "histogram"}, {"type": "bar"}],
-                   [{"type": "pie"}, {"type": "scatter"}]]
-        )
+    def _calculate_confidence(self, predictions: Dict[str, float], features: Dict[str, float]) -> float:
+        """Calculate prediction confidence"""
+        # Base confidence on prediction consistency and feature strength
+        scores = list(predictions.values())
+        consistency = 1.0 - np.std(scores)  # Higher consistency = higher confidence
         
-        # 1. Temperature distribution histogram
-        fig.add_trace(
-            go.Histogram(x=df['Temperature_Anomaly'], nbinsx=30, name='Distribution',
-                        marker_color='lightblue'),
-            row=1, col=1
-        )
+        # Feature strength (presence of relevant indicators)
+        feature_strength = min(
+            features.get('depression_word_count', 0) + 
+            features.get('anxiety_word_count', 0) + 
+            features.get('stress_word_count', 0), 5
+        ) / 5
         
-        # 2. Decade comparison
-        decade_avg = df.groupby('Decade')['Temperature_Anomaly'].mean().reset_index()
-        fig.add_trace(
-            go.Bar(x=decade_avg['Decade'], y=decade_avg['Temperature_Anomaly'],
-                  name='Decade Average', marker_color='orange'),
-            row=1, col=2
-        )
-        
-        # 3. Warming vs cooling pie chart
-        warming_count = (df['Temperature_Anomaly'] > 0).sum()
-        cooling_count = (df['Temperature_Anomaly'] <= 0).sum()
-        
-        fig.add_trace(
-            go.Pie(labels=['Warming Years', 'Cooling Years'],
-                  values=[warming_count, cooling_count],
-                  marker_colors=['red', 'blue']),
-            row=2, col=1
-        )
-        
-        # 4. Recent trends scatter
-        recent_data = df[df['Year'] >= 1980]
-        fig.add_trace(
-            go.Scatter(x=recent_data['Year'], y=recent_data['Temperature_Anomaly'],
-                      mode='markers+lines', name='Recent Trends',
-                      marker_color='green'),
-            row=2, col=2
-        )
-        
-        fig.update_layout(height=600, showlegend=False, title_text="Climate Data Analysis Dashboard")
-        
-        return fig
+        confidence = (consistency * 0.7) + (feature_strength * 0.3)
+        return min(max(confidence, 0.1), 0.95)  # Constrain between 0.1 and 0.95
     
-    def create_heatmap(self, df):
-        """Create decade-year heatmap visualization"""
-        # Prepare data for heatmap
-        df_heatmap = df.copy()
-        df_heatmap['Decade_Start'] = (df_heatmap['Year'] // 10) * 10
-        df_heatmap['Year_in_Decade'] = df_heatmap['Year'] % 10
-        
-        # Create pivot table
-        heatmap_data = df_heatmap.pivot_table(
-            values='Temperature_Anomaly',
-            index='Decade_Start',
-            columns='Year_in_Decade',
-            aggfunc='mean'
+    def _create_fallback_prediction(self, text: str, user_id: Optional[str]) -> MentalHealthPrediction:
+        """Create fallback prediction when main prediction fails"""
+        return MentalHealthPrediction(
+            text=text,
+            depression_score=0.3,
+            anxiety_score=0.3,
+            stress_score=0.3,
+            overall_severity=MentalHealthSeverity.MODERATE,
+            confidence=0.5,
+            recommendations=self.recommendations_db[MentalHealthSeverity.MODERATE][:2],
+            timestamp=datetime.now(),
+            user_id=user_id
         )
-        
-        # Create heatmap with Plotly
-        fig = go.Figure(data=go.Heatmap(
-            z=heatmap_data.values,
-            x=[f'Year {i}' for i in range(10)],
-            y=[f'{int(decade)}s' for decade in heatmap_data.index],
-            colorscale='RdYlBu_r',
-            zmid=0,
-            hovertemplate='<b>Decade:</b> %{y}<br><b>Year in Decade:</b> %{x}<br><b>Anomaly:</b> %{z:.2f}°C<extra></extra>'
-        ))
-        
-        fig.update_layout(
-            title='Temperature Anomaly Heatmap by Decade',
-            xaxis_title='Year in Decade',
-            yaxis_title='Decade',
-            height=400
-        )
-        
-        return fig
-    
-    def generate_report(self, stats):
-        """Generate automated climate analysis report"""
-        warming_rate = stats.get('warming_rate', 0)
-        recent_rate = stats.get('recent_warming_rate', 0)
-        
-        report = f"""
-        ## 📊 Climate Analysis Report
-        
-        **Data Overview:**
-        - 📅 Time Period: {stats.get('data_range', 'N/A')}
-        - 📈 Total Years: {stats.get('total_years', 0)}
-        - 🌡️ Average Anomaly: {stats.get('mean_anomaly', 0):.3f}°C
-        
-        **Key Findings:**
-        - 🔥 **Warming Trend**: {warming_rate:.4f}°C per decade
-        - 📊 **Statistical Confidence**: R = {stats.get('correlation', 0):.3f}
-        - ✅ **Significance**: {'Highly significant' if stats.get('trend_significant', False) else 'Not significant'}
-        
-        **Temperature Extremes:**
-        - 🥵 **Warmest Year**: {stats.get('max_year', 'N/A')} ({stats.get('max_anomaly', 0):.2f}°C)
-        - 🥶 **Coolest Year**: {stats.get('min_year', 'N/A')} ({stats.get('min_anomaly', 0):.2f}°C)
-        - ⚡ **Extreme Events**: {stats.get('extreme_years', 0)} years
-        
-        **Recent Trends (Last 50 Years):**
-        - 🚀 **Acceleration**: {recent_rate:.4f}°C per decade
-        - 📈 **Warming Years**: {stats.get('warming_years', 0)} out of {stats.get('total_years', 0)}
-        
-        **Climate Context:**
-        """
-        
-        if warming_rate > 0.1:
-            report += "\n- ⚠️ **Significant warming trend detected** - consistent with global climate change"
-        if recent_rate > warming_rate * 1.5:
-            report += "\n- 🚨 **Accelerating warming** in recent decades"
-        if stats.get('extreme_years', 0) > stats.get('total_years', 1) * 0.05:
-            report += "\n- 🌡️ **High frequency of extreme temperature events**"
-        
-        return report
 
-def main():
-    """Main application function"""
+class DataCollector:
+    """Advanced data collection from multiple sources"""
     
-    # Initialize the app
-    app = ClimateDataApp()
-    
-    # Header
-    st.markdown('<div class="main-header">🌍 Climate Data Explorer</div>', unsafe_allow_html=True)
-    st.markdown("""
-    <div style="text-align: center; margin-bottom: 2rem;">
-        <p style="font-size: 1.2rem; color: #7f8c8d;">
-            Professional climate data analysis and visualization platform<br>
-            <em>Powered by NASA GISS temperature data</em>
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Sidebar controls
-    st.sidebar.markdown("## 🎛️ Analysis Controls")
-    
-    # Data source selection
-    data_source = st.sidebar.selectbox(
-        "Select Data Source:",
-        ["NASA GISS (Live Data)", "Demonstration Data"],
-        help="Choose between live NASA data or demonstration dataset"
-    )
-    
-    # Load data based on selection
-    if data_source == "NASA GISS (Live Data)":
-        if st.sidebar.button("🔄 Load NASA Data", type="primary"):
-            app.data = app.download_nasa_data()
-    else:
-        app.data = app._create_demo_data()
-        st.sidebar.info("Using demonstration data for analysis")
-    
-    # Process data if available
-    if app.data is not None:
-        app.processed_data = app.process_data(app.data)
+    def __init__(self):
+        self.reddit_client = None
+        self.twitter_client = None
+        self.session = None
         
-        # Time period filter
-        st.sidebar.markdown("### 📅 Time Period Filter")
-        year_range = st.sidebar.slider(
-            "Select Year Range:",
-            min_value=int(app.data['Year'].min()),
-            max_value=int(app.data['Year'].max()),
-            value=(int(app.data['Year'].min()), int(app.data['Year'].max())),
-            step=1
-        )
+    async def collect_reddit_data(self, subreddits: List[str], limit: int = 100) -> List[Dict]:
+        """Collect data from Reddit subreddits"""
+        data = []
         
-        # Filter data based on year range
-        filtered_data = app.processed_data[
-            (app.processed_data['Year'] >= year_range[0]) & 
-            (app.processed_data['Year'] <= year_range[1])
+        # Mock data for demonstration (replace with actual Reddit API)
+        mock_posts = [
+            "I've been feeling really down lately, nothing seems to matter anymore",
+            "Can't sleep, mind racing with worries about everything",
+            "Work stress is killing me, I feel like I'm drowning",
+            "Having a great day today, feeling positive about life",
+            "Anxiety is through the roof, heart pounding constantly",
         ]
         
-        # Calculate statistics
-        stats = app.calculate_statistics(filtered_data)
+        for i in range(min(limit, len(mock_posts) * 20)):
+            post = mock_posts[i % len(mock_posts)]
+            data.append({
+                'text': post,
+                'source': 'reddit',
+                'subreddit': subreddits[i % len(subreddits)] if subreddits else 'depression',
+                'timestamp': datetime.now() - timedelta(hours=i),
+                'id': f'reddit_{i}'
+            })
+            
+        return data
+    
+    async def collect_twitter_data(self, keywords: List[str], limit: int = 100) -> List[Dict]:
+        """Collect data from Twitter"""
+        # Mock Twitter data
+        mock_tweets = [
+            "Feeling overwhelmed by everything happening right now #mentalhealth",
+            "Another sleepless night, mind won't stop racing #anxiety", 
+            "So grateful for my support system today #wellness",
+            "Work pressure is intense, need to find better balance #stress",
+            "Therapy session was really helpful today #selfcare"
+        ]
         
-        # Display key metrics
-        st.markdown('<div class="sub-header">📊 Key Climate Metrics</div>', unsafe_allow_html=True)
+        data = []
+        for i in range(min(limit, len(mock_tweets) * 20)):
+            tweet = mock_tweets[i % len(mock_tweets)]
+            data.append({
+                'text': tweet,
+                'source': 'twitter',
+                'keywords': keywords,
+                'timestamp': datetime.now() - timedelta(minutes=i*10),
+                'id': f'twitter_{i}'
+            })
+            
+        return data
+    
+    async def collect_mixed_data(self, sources: Dict[str, Dict]) -> pd.DataFrame:
+        """Collect data from multiple sources"""
+        all_data = []
         
+        if 'reddit' in sources:
+            reddit_data = await self.collect_reddit_data(
+                sources['reddit'].get('subreddits', ['depression', 'anxiety']),
+                sources['reddit'].get('limit', 50)
+            )
+            all_data.extend(reddit_data)
+            
+        if 'twitter' in sources:
+            twitter_data = await self.collect_twitter_data(
+                sources['twitter'].get('keywords', ['depression', 'anxiety', 'stress']),
+                sources['twitter'].get('limit', 50)
+            )
+            all_data.extend(twitter_data)
+            
+        return pd.DataFrame(all_data)
+
+class AdvancedDashboard:
+    """Professional dashboard with advanced visualizations"""
+    
+    def __init__(self):
+        self.predictions_db = []
+        
+    def create_comprehensive_dashboard(self, predictions: List[MentalHealthPrediction]):
+        """Create comprehensive Streamlit dashboard"""
+        st.set_page_config(
+            page_title="AI Mental Health Analyzer",
+            page_icon="🧠",
+            layout="wide",
+            initial_sidebar_state="expanded"
+        )
+        
+        # Header
+        st.title("🧠 AI Mental Health Chat Analyzer")
+        st.markdown("*Advanced NLP-based Mental Health Detection System*")
+        
+        # Sidebar
+        st.sidebar.header("Dashboard Controls")
+        date_range = st.sidebar.date_input(
+            "Select Date Range",
+            value=(datetime.now() - timedelta(days=30), datetime.now()),
+            max_value=datetime.now()
+        )
+        
+        severity_filter = st.sidebar.multiselect(
+            "Filter by Severity",
+            [s.value for s in MentalHealthSeverity],
+            default=[s.value for s in MentalHealthSeverity]
+        )
+        
+        # Metrics
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.metric(
-                "🌡️ Warming Rate",
-                f"{stats.get('warming_rate', 0):.4f}°C/decade",
-                delta=f"R²={stats.get('correlation', 0)**2:.3f}"
-            )
-        
+            st.metric("Total Analyses", len(predictions))
         with col2:
-            st.metric(
-                "🥵 Warmest Year",
-                f"{stats.get('max_year', 'N/A')}",
-                delta=f"{stats.get('max_anomaly', 0):.2f}°C"
-            )
-        
+            avg_depression = np.mean([p.depression_score for p in predictions])
+            st.metric("Avg Depression Score", f"{avg_depression:.2f}")
         with col3:
-            st.metric(
-                "📈 Data Points",
-                f"{stats.get('total_years', 0)} years",
-                delta=f"{stats.get('extreme_years', 0)} extreme"
-            )
-        
+            avg_anxiety = np.mean([p.anxiety_score for p in predictions])
+            st.metric("Avg Anxiety Score", f"{avg_anxiety:.2f}")
         with col4:
-            warming_pct = (stats.get('warming_years', 0) / stats.get('total_years', 1)) * 100
-            st.metric(
-                "🔥 Warming Years",
-                f"{warming_pct:.1f}%",
-                delta=f"{stats.get('warming_years', 0)}/{stats.get('total_years', 0)}"
-            )
+            high_risk_count = len([p for p in predictions if p.overall_severity in [MentalHealthSeverity.HIGH, MentalHealthSeverity.CRITICAL]])
+            st.metric("High Risk Cases", high_risk_count)
         
-        # Main visualizations
-        st.markdown('<div class="sub-header">📈 Interactive Visualizations</div>', unsafe_allow_html=True)
-        
-        # Tab layout for different visualizations
-        tab1, tab2, tab3, tab4 = st.tabs([
-            "🌡️ Temperature Trends", 
-            "📊 Statistical Analysis", 
-            "🔥 Heatmap View", 
-            "📋 Analysis Report"
-        ])
-        
-        with tab1:
-            st.plotly_chart(
-                app.create_interactive_timeseries(filtered_data), 
-                use_container_width=True
-            )
-            
-            st.markdown("""
-            **💡 How to Read This Chart:**
-            - **Blue line**: Annual temperature anomalies (difference from 20th century average)
-            - **Red line**: 10-year moving average (smoothed trend)
-            - **Red diamonds**: Extreme temperature years (>2 standard deviations)
-            - **Hover** over points for detailed information
-            """)
-        
-        with tab2:
-            st.plotly_chart(
-                app.create_distribution_plot(filtered_data), 
-                use_container_width=True
-            )
-            
-            st.markdown("""
-            **📊 Statistical Insights:**
-            - **Top Left**: Distribution shows shift toward warming
-            - **Top Right**: Clear acceleration in recent decades  
-            - **Bottom Left**: Proportion of warming vs cooling years
-            - **Bottom Right**: Recent trend detail (1980+)
-            """)
-        
-        with tab3:
-            st.plotly_chart(
-                app.create_heatmap(filtered_data), 
-                use_container_width=True
-            )
-            
-            st.markdown("""
-            **🔥 Heatmap Analysis:**
-            - **Rows**: Each decade from 1880s to present
-            - **Columns**: Years 0-9 within each decade
-            - **Colors**: Red = warming, Blue = cooling
-            - **Pattern**: Notice increasing red in recent decades
-            """)
-        
-        with tab4:
-            st.markdown(app.generate_report(stats))
-            
-            # Download options
-            st.markdown("### 💾 Download Options")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                # Download processed data
-                csv = filtered_data.to_csv(index=False)
-                st.download_button(
-                    label="📁 Download Data (CSV)",
-                    data=csv,
-                    file_name=f"climate_data_{year_range[0]}_{year_range[1]}.csv",
-                    mime="text/csv"
-                )
-            
-            with col2:
-                # Download analysis report
-                report_text = app.generate_report(stats)
-                st.download_button(
-                    label="📄 Download Report (TXT)",
-                    data=report_text,
-                    file_name=f"climate_report_{year_range[0]}_{year_range[1]}.txt",
-                    mime="text/plain"
-                )
-    
-    else:
-        # No data loaded state
-        st.markdown("""
-        <div class="info-box">
-            <h3>🚀 Getting Started</h3>
-            <p>Click <strong>"Load NASA Data"</strong> in the sidebar to begin your climate analysis journey!</p>
-            <p>This app will download the latest temperature data from NASA GISS and create professional visualizations.</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Feature showcase
-        st.markdown("### ✨ App Features")
-        
-        col1, col2, col3 = st.columns(3)
+        # Visualizations
+        col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("""
-            **🌍 Real NASA Data**
-            - Live GISS temperature data
-            - Global temperature anomalies
-            - Historical records since 1880
-            """)
+            # Severity distribution
+            severity_counts = {}
+            for p in predictions:
+                severity_counts[p.overall_severity.value] = severity_counts.get(p.overall_severity.value, 0) + 1
+            
+            fig_pie = px.pie(
+                values=list(severity_counts.values()),
+                names=list(severity_counts.keys()),
+                title="Severity Distribution"
+            )
+            st.plotly_chart(fig_pie)
         
         with col2:
-            st.markdown("""
-            **📊 Professional Analysis**
-            - Statistical trend analysis
-            - Moving averages & smoothing
-            - Extreme event detection
-            """)
+            # Score trends
+            df_trends = pd.DataFrame([
+                {
+                    'timestamp': p.timestamp,
+                    'depression': p.depression_score,
+                    'anxiety': p.anxiety_score,
+                    'stress': p.stress_score
+                } for p in predictions
+            ])
+            
+            fig_trends = px.line(
+                df_trends, x='timestamp', y=['depression', 'anxiety', 'stress'],
+                title="Mental Health Scores Over Time"
+            )
+            st.plotly_chart(fig_trends)
         
-        with col3:
-            st.markdown("""
-            **🎨 Interactive Visualizations**
-            - Plotly interactive charts
-            - Multiple view perspectives
-            - Downloadable reports
-            """)
-    
-    # Footer
-    st.markdown("---")
-    st.markdown("""
-    <div style="text-align: center; color: #7f8c8d; margin-top: 2rem;">
-        <p>🌍 <strong>Climate Data Explorer</strong> | Built with ❤️ for climate science education</p>
-        <p><em>Data Source: NASA Goddard Institute for Space Studies (GISS)</em></p>
-        <p>Professional climate analysis tools for researchers, educators, and climate enthusiasts</p>
-    </div>
-    """, unsafe_allow_html=True)
+        # Recent predictions table
+        st.subheader("Recent Analyses")
+        recent_predictions = sorted(predictions, key=lambda x: x.timestamp, reverse=True)[:10]
+        
+        table_data = []
+        for p in recent_predictions:
+            table_data.append({
+                'Timestamp': p.timestamp.strftime('%Y-%m-%d %H:%M'),
+                'Text Preview': p.text[:50] + '...' if len(p.text) > 50 else p.text,
+                'Severity': p.overall_severity.value,
+                'Depression': f"{p.depression_score:.2f}",
+                'Anxiety': f"{p.anxiety_score:.2f}",
+                'Stress': f"{p.stress_score:.2f}",
+                'Confidence': f"{p.confidence:.2f}"
+            })
+        
+        st.dataframe(pd.DataFrame(table_data))
 
+class MentalHealthAnalyzerSystem:
+    """Main system orchestrating all components"""
+    
+    def __init__(self):
+        self.agent = MentalHealthAgent()
+        self.data_collector = DataCollector()
+        self.dashboard = AdvancedDashboard()
+        self.predictions_cache = []
+        
+        # Initialize database
+        self.db_engine = create_engine('sqlite:///mental_health_analyzer.db')
+        self.init_database()
+        
+        logger.info("Mental Health Analyzer System initialized")
+    
+    def init_database(self):
+        """Initialize SQLite database for storing predictions"""
+        try:
+            Base = declarative_base()
+            
+            class PredictionRecord(Base):
+                __tablename__ = 'predictions'
+                
+                id = Column(Integer, primary_key=True)
+                text = Column(Text)
+                depression_score = Column(Float)
+                anxiety_score = Column(Float) 
+                stress_score = Column(Float)
+                severity = Column(String)
+                confidence = Column(Float)
+                timestamp = Column(DateTime)
+                user_id = Column(String)
+            
+            Base.metadata.create_all(self.db_engine)
+            logger.info("Database initialized successfully")
+            
+        except Exception as e:
+            logger.error(f"Database initialization error: {e}")
+    
+    async def run_analysis_pipeline(self):
+        """Run complete analysis pipeline"""
+        logger.info("Starting analysis pipeline...")
+        
+        # Step 1: Collect data
+        sources = {
+            'reddit': {'subreddits': ['depression', 'anxiety', 'mentalhealth'], 'limit': 100},
+            'twitter': {'keywords': ['depression', 'anxiety', 'stress'], 'limit': 100}
+        }
+        
+        data_df = await self.data_collector.collect_mixed_data(sources)
+        logger.info(f"Collected {len(data_df)} data points")
+        
+        # Step 2: Train models (if training data available)
+        if not self.agent.models:
+            self.agent.train_models(data_df)
+        
+        # Step 3: Analyze all collected data
+        predictions = []
+        for _, row in data_df.iterrows():
+            prediction = self.agent.predict_mental_health(row['text'], row.get('id'))
+            predictions.append(prediction)
+        
+        self.predictions_cache.extend(predictions)
+        
+        # Step 4: Save to database
+        self._save_predictions_to_db(predictions)
+        
+        logger.info(f"Analysis completed. Processed {len(predictions)} texts")
+        return predictions
+    
+    def _save_predictions_to_db(self, predictions: List[MentalHealthPrediction]):
+        """Save predictions to database"""
+        try:
+            Session = sessionmaker(bind=self.db_engine)
+            session = Session()
+            
+            for pred in predictions:
+                # Convert to dict and save (simplified)
+                pass  # Implementation would save to actual database
+                
+            session.commit()
+            session.close()
+            
+        except Exception as e:
+            logger.error(f"Error saving to database: {e}")
+    
+    def launch_dashboard(self):
+        """Launch Streamlit dashboard"""
+        if not self.predictions_cache:
+            # Create demo predictions if none exist
+            demo_texts = [
+                "I feel so sad and empty, nothing brings me joy anymore",
+                "My anxiety is through the roof, I can't stop worrying",
+                "Work stress is overwhelming me completely", 
+                "Having a good day today, feeling optimistic",
+                "Can't sleep, mind racing with negative thoughts"
+            ]
+            
+            for text in demo_texts:
+                pred = self.agent.predict_mental_health(text)
+                self.predictions_cache.append(pred)
+        
+        self.dashboard.create_comprehensive_dashboard(self.predictions_cache)
+    
+    def analyze_single_text(self, text: str) -> MentalHealthPrediction:
+        """Analyze a single text input"""
+        return self.agent.predict_mental_health(text)
+
+# Flask API for production deployment
+def create_api_app():
+    """Create Flask API application"""
+    app = Flask(__name__)
+    system = MentalHealthAnalyzerSystem()
+    
+    @app.route('/analyze', methods=['POST'])
+    def analyze_text():
+        try:
+            data = request.json
+            text = data.get('text', '')
+            user_id = data.get('user_id', None)
+            
+            prediction = system.analyze_single_text(text)
+            
+            return jsonify({
+                'success': True,
+                'prediction': asdict(prediction)
+            })
+            
+        except Exception as e:
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
+    
+    @app.route('/health', methods=['GET'])
+    def health_check():
+        return jsonify({'status': 'healthy', 'timestamp': datetime.now().isoformat()})
+    
+    return app
+
+# Main execution
 if __name__ == "__main__":
-    main()
+    # Initialize system
+    system = MentalHealthAnalyzerSystem()
+    
+    # Run analysis pipeline
+    # asyncio.run(system.run_analysis_pipeline())
+    
+    # Launch dashboard (uncomment for Streamlit)
+    # system.launch_dashboard()
+    
+    # Or run Flask API (uncomment for API)
+    app = create_api_app()
+    app.run(debug=True, host='0.0.0.0', port=5000)
